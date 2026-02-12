@@ -22,7 +22,13 @@ echo "║  [0] 退出                                                    ║"
 echo "╚══════════════════════════════════════════════════════════════╝"
 echo ""
 
-read -p "请输入步骤编号 (0-2): " choice
+# 支持命令行参数，用于非交互式执行（如 crontab）
+if [ -n "$1" ]; then
+    choice=$1
+    echo "自动执行模式，选择: $choice"
+else
+    read -p "请输入步骤编号 (0-2): " choice
+fi
 
 case $choice in
     1)
