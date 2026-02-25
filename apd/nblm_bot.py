@@ -1308,6 +1308,199 @@ class NotebookLMBot:
             update_status(paper_id, Status.ERROR, error=error_msg, increment_retry=True)
             return False
 
+    def delete_all_notebooks(self) -> int:
+        """
+        Delete all notebooks from NotebookLM.
+        
+        Navigates to the homepage and repeatedly deletes the first notebook
+        until none remain. Each deletion follows the flow:
+        1. Click three-dot menu (⋮) on the first notebook card/row
+        2. Click "删除" (Delete) in the dropdown menu
+        3. Click "删除" (Delete) in the confirmation dialog
+        
+        Works in both Grid View and List View.
+        
+        Returns:
+            Number of notebooks deleted
+        """
+        logger.info("Starting deletion of all notebooks...")
+        
+        # Navigate to NotebookLM homepage
+        if not self.navigate_to_notebooklm():
+            if not self.wait_for_login():
+                logger.error("Login failed, cannot delete notebooks")
+                return 0
+        
+        time.sleep(3)  # Wait for page to load
+        
+        # Make sure we're on the "我的笔记本" tab
+        try:
+            my_notebooks_tab = self.page.get_by_text("我的笔记本", exact=True)
+            if my_notebooks_tab.count() > 0 and my_notebooks_tab.first.is_visible():
+                my_notebooks_tab.first.click()
+                time.sleep(2)
+                logger.debug("Clicked '我的笔记本' tab")
+        except Exception as e:
+            logger.debug(f"Could not click '我的笔记本' tab: {e}")
+        
+        # Take a screenshot to debug initial state
+        self.take_screenshot("delete_initial_state")
+        
+        deleted_count = 0
+        max_attempts = 200  # Safety limit to prevent infinite loop
+        
+        for attempt in range(max_attempts):
+            # Detect notebooks using the three-dot menu button which exists in both views
+            # This is the most reliable selector across Grid and List views
+            more_buttons = self.page.locator('button.project-button-more, button[aria-label="项目操作菜单"]')
+            button_count = more_buttons.count()
+            
+            if button_count == 0:
+                # Also check for mat-card as fallback
+                cards = self.page.locator('mat-card')
+                rows = self.page.locator('tr.mat-mdc-row')
+                if cards.count() == 0 and rows.count() == 0:
+                    logger.info(f"No more notebooks found. Total deleted: {deleted_count}")
+                    break
+                else:
+                    # Cards/rows exist but no more buttons visible, might need to scroll
+                    logger.warning("Found cards/rows but no menu buttons, taking screenshot")
+                    self.take_screenshot(f"delete_no_buttons_{attempt}")
+                    break
+            
+            logger.info(f"Found {button_count} notebooks remaining. Deleting notebook #{deleted_count + 1}...")
+            
+            try:
+                # Step 1: Click the three-dot menu button on the first notebook
+                menu_clicked = False
+                
+                try:
+                    first_btn = more_buttons.first
+                    if first_btn.is_visible():
+                        first_btn.click()
+                        time.sleep(1)
+                        menu_clicked = True
+                        logger.debug("Clicked project-button-more")
+                except Exception as e:
+                    logger.debug(f"Direct button click failed: {e}")
+                
+                if not menu_clicked:
+                    # Fallback: try clicking any more_vert icon
+                    try:
+                        more_icons = self.page.locator('mat-icon:text("more_vert")')
+                        if more_icons.count() > 0 and more_icons.first.is_visible():
+                            more_icons.first.click()
+                            time.sleep(1)
+                            menu_clicked = True
+                            logger.debug("Clicked more_vert icon directly")
+                    except Exception as e:
+                        logger.debug(f"more_vert icon click failed: {e}")
+                
+                if not menu_clicked:
+                    logger.error("Could not find or click the three-dot menu button")
+                    self.take_screenshot(f"delete_menu_not_found_{attempt}")
+                    break
+                
+                # Step 2: Click "删除" (Delete) in the dropdown menu
+                delete_clicked = False
+                try:
+                    # The delete button in the menu has class "delete-button"
+                    delete_btn = self.page.locator('button.delete-button')
+                    if delete_btn.count() > 0 and delete_btn.first.is_visible():
+                        delete_btn.first.click()
+                        time.sleep(1)
+                        delete_clicked = True
+                        logger.debug("Clicked delete-button in menu")
+                except Exception as e:
+                    logger.debug(f"delete-button click failed: {e}")
+                
+                if not delete_clicked:
+                    try:
+                        # Fallback: find by text in the menu
+                        menu = self.page.locator('[role="menu"]')
+                        if menu.count() > 0:
+                            del_item = menu.locator('button:has-text("删除")')
+                            if del_item.count() > 0 and del_item.first.is_visible():
+                                del_item.first.click()
+                                time.sleep(1)
+                                delete_clicked = True
+                                logger.debug("Clicked delete by text in menu")
+                    except Exception as e:
+                        logger.debug(f"Menu text search failed: {e}")
+                
+                if not delete_clicked:
+                    logger.error("Could not find or click delete option in menu")
+                    self.take_screenshot(f"delete_option_not_found_{attempt}")
+                    self.page.keyboard.press("Escape")
+                    time.sleep(0.5)
+                    break
+                
+                # Step 3: Click "删除" (Delete) in the confirmation dialog
+                confirm_clicked = False
+                try:
+                    # The confirm button has aria-label="确认删除" or class "submit"
+                    confirm_btn = self.page.locator(
+                        'button[aria-label="确认删除"], '
+                        'button.submit:has-text("删除"), '
+                        'mat-dialog-actions button:has-text("删除")'
+                    ).first
+                    if confirm_btn.is_visible():
+                        confirm_btn.click()
+                        time.sleep(2)  # Wait for deletion to complete
+                        confirm_clicked = True
+                        logger.debug("Clicked confirm delete button")
+                except Exception as e:
+                    logger.debug(f"Confirm button click failed: {e}")
+                
+                if not confirm_clicked:
+                    try:
+                        # Fallback: find any visible "删除" button (dialog button)
+                        delete_buttons = self.page.locator('button:has-text("删除"):visible')
+                        if delete_buttons.count() > 0:
+                            delete_buttons.last.click()
+                            time.sleep(2)
+                            confirm_clicked = True
+                    except Exception as e:
+                        logger.debug(f"Fallback confirm click failed: {e}")
+                
+                if not confirm_clicked:
+                    logger.error("Could not confirm deletion")
+                    self.take_screenshot(f"delete_confirm_failed_{attempt}")
+                    self.page.keyboard.press("Escape")
+                    time.sleep(0.5)
+                    break
+                
+                deleted_count += 1
+                logger.info(f"✅ Deleted notebook #{deleted_count}")
+                
+                # Wait for the page to update after deletion
+                time.sleep(2)
+                
+            except Exception as e:
+                logger.error(f"Error during deletion attempt {attempt + 1}: {e}")
+                self.take_screenshot(f"delete_error_{attempt}")
+                break
+        
+        logger.info(f"Deletion complete. Total notebooks deleted: {deleted_count}")
+        return deleted_count
+
+
+def delete_all_notebooks_workflow(headless: bool = False) -> int:
+    """
+    Delete all notebooks from NotebookLM.
+    
+    Convenience function for CLI usage. Opens NotebookLM and deletes
+    all notebooks one by one.
+    
+    Args:
+        headless: Run browser in headless mode (default False for visibility)
+        
+    Returns:
+        Number of notebooks deleted
+    """
+    with NotebookLMBot(headless=headless) as bot:
+        return bot.delete_all_notebooks()
+
 
 def process_papers_for_week(
     week_id: str,

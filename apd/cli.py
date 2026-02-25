@@ -830,6 +830,59 @@ def login() -> None:
 
 
 # =============================================================================
+# Clean NotebookLM Command
+# =============================================================================
+
+@main.command("clean-nblm")
+@click.option(
+    "--headful",
+    is_flag=True,
+    default=False,
+    help="Run browser in visible mode (recommended for monitoring)"
+)
+@click.option(
+    "--yes", "-y",
+    is_flag=True,
+    help="Skip confirmation prompt"
+)
+def clean_nblm(headful: bool, yes: bool) -> None:
+    """
+    Delete all notebooks from NotebookLM.
+    
+    This command opens NotebookLM and deletes all notebooks one by one.
+    Useful for cleaning up when notebook limit is reached.
+    
+    Use --headful to watch the deletion process in a visible browser.
+    Use --yes to skip the confirmation prompt (for automation).
+    """
+    from .nblm_bot import delete_all_notebooks_workflow
+    
+    logger = get_logger()
+    
+    if not yes:
+        click.confirm(
+            "⚠️  This will delete ALL notebooks from NotebookLM. Continue?",
+            abort=True
+        )
+    
+    click.echo("🗑️  Starting NotebookLM notebook cleanup...")
+    click.echo(f"   Mode: {'Headful' if headful else 'Headless'}")
+    click.echo()
+    
+    try:
+        deleted = delete_all_notebooks_workflow(headless=not headful)
+        click.echo()
+        click.echo(f"✅ Cleanup complete! Deleted {deleted} notebooks.")
+    except KeyboardInterrupt:
+        click.echo("\n⚠️  Cleanup interrupted by user")
+        sys.exit(130)
+    except Exception as e:
+        logger.exception("NotebookLM cleanup failed")
+        click.echo(f"❌ Error: {e}", err=True)
+        sys.exit(1)
+
+
+# =============================================================================
 # Publish Command (Phase 3)
 # =============================================================================
 
